@@ -1,0 +1,1345 @@
+from PyQt4 import QtCore, QtGui, Qt
+import winsound
+import threading
+from random import randint
+from math import *
+from tkinter import *
+import sys
+import os
+import shutil
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from visual.graph import *
+from random import random
+import numpy as np
+import time
+
+
+def deltaEnergy_after_collision(velocity,delta_velocity):
+    deltaEnergy = ((velocity+delta_velocity)**2)/2-(velocity**2)/2
+    return deltaEnergy
+
+
+def deltaVelocity_after_collision(N,totalEnergy,velocity):
+    deltaVelocity = (sqrt(2*totalEnergy/N/10))*(1-2*random())
+    return deltaVelocity
+
+
+def average(array):
+    avg = 0.0
+    n = len(array)
+    for num in array:
+        avg += 1.0*num/n
+    return avg
+
+
+def ideal_gas(N, totalEnergy, steps, state):
+    demonEnergy = None
+    systemEnergy = None
+    list_demonEnergy = []
+    list_velocity = []
+
+    if state == 1:
+        demonEnergy = 0
+        systemEnergy=totalEnergy
+        velocity_0=sqrt(2*totalEnergy/N)
+        list_velocity=[velocity_0 for i in range(N)]
+        for i in range(steps):
+            for j in range(len(list_velocity)):
+                velocity=list_velocity[j]
+                delta_velocity=deltaVelocity_after_collision(N,totalEnergy,velocity)
+                delta_Energy=deltaEnergy_after_collision(velocity,delta_velocity)
+                if demonEnergy-delta_Energy>=0:
+                    list_velocity[j]+=delta_velocity
+                    demonEnergy-=delta_Energy
+            list_demonEnergy[0:0]=[demonEnergy]
+        demonEnergy=average(list_demonEnergy)
+        return demonEnergy,list_demonEnergy,list_velocity
+
+    elif state==2:
+        demonEnergy=totalEnergy
+        systemEnergy=0
+        velocity_0=0
+        list_velocity=[0 for i in range (N)]
+        for i in range(steps):
+            for j in range(len(list_velocity)):
+                velocity=list_velocity[j]
+                delta_velocity=deltaVelocity_after_collision(N,totalEnergy,velocity)
+                delta_Energy=deltaEnergy_after_collision(velocity,delta_velocity)
+                if demonEnergy-delta_Energy>=0 and demonEnergy-delta_Energy<=totalEnergy:
+                    list_velocity[j]+=delta_velocity
+                    demonEnergy-=delta_Energy
+            list_demonEnergy[0:0]=[demonEnergy]
+        demonEnergy=average(list_demonEnergy)
+        return demonEnergy,list_demonEnergy,list_velocity
+
+
+# This is a thread to do the main-operation
+class worker(QtCore.QThread):
+    single = QtCore.pyqtSignal([list, list, list])
+
+    def __init__(self, parent=None):
+        QtCore.QThread.__init__(self, parent)
+        self.exiting = False
+
+    def __del__(self):
+        self.exiting = True
+        self.wait()
+
+    def render(self, N, totalEnergy, steps, state):
+        self.N = N
+        self.totalEnergy = totalEnergy
+        self.steps = steps
+        self.state = state
+        self.start()
+
+    def run(self):
+
+        list_demonEnergy=[]
+        list_velocity=[]
+        list_operation=[]
+
+        for i in range(1,11):
+            a,b,c=ideal_gas(self.N*i, self.totalEnergy, self.steps, self.state)
+            list_demonEnergy[0:0]=[a]
+            list_velocity[0:0]=[c]
+            list_operation[0:0]=[b]
+        list_demonEnergy=list_demonEnergy[::-1]
+        list_operation=list_operation[::-1]
+        self.single.emit(list_demonEnergy, list_operation, list_velocity)
+
+
+# This thread is to show a dynamic change for picture 4
+class Loop(QtCore.QThread):
+    single = QtCore.pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        QtCore.QThread.__init__(self, parent)
+        self.exiting = False
+
+    def __del__(self):
+        self.exiting = True
+        self.wait()
+
+    def render(self):
+        self.start()
+
+    def run(self):
+        n = 20
+        while not self.exiting and n > 0:
+            time.sleep(0.1)
+            n -= 1
+            self.single.emit(n)
+
+##############################################################################################
+
+
+def music():
+    soundFile = 'open.wav'
+    winsound.PlaySound(soundFile, winsound.SND_FILENAME)
+
+
+def finish_music():
+    winsound.PlaySound("finish.wav", winsound.SND_FILENAME)
+
+# Open movie(only a try to learn class and tk)
+class RandomBall():
+
+    def __init__(self, canvas, scrnwidth, scrnheight):
+        self.canvas = canvas
+        self.xpos = randint(70, int(scrnwidth)-70)
+        self.ypos = randint(70, int(scrnheight)-70)
+        self.xvelocity = randint(6, 12)
+        self.yvelocity = randint(6, 12)
+        self.scrnwidth = scrnwidth
+        self.scrnheight = scrnheight
+        self.radius = randint(40, 70)
+        r = lambda: randint(0, 255)
+        self.color = "#%02x%02x%02x" % (r(), r(), r())
+
+    def create_ball(self):
+        x1 = self.xpos - self.radius
+        y1 = self.ypos - self.radius
+        x2 = self.xpos + self.radius
+        y2 = self.ypos + self.radius
+        self.itm = self.canvas.create_oval(x1, y1, x2, y2, fill=self.color, outline=self.color)
+
+    def move_ball(self):
+        self.xpos += self.xvelocity
+        self.ypos += self.yvelocity
+        if self.ypos >= self.scrnheight - self.radius:
+            self.yvelocity = -self.yvelocity
+        if self.ypos <= self.radius:
+            self.yvelocity = abs(self.yvelocity)
+        if self.xpos >= self.scrnwidth - self.radius or self.xpos <= self.radius:
+            self.xvelocity = -self.xvelocity
+        self.canvas.move(self.itm, self.xvelocity, self.yvelocity)
+
+
+class Movie:
+
+    balls = []
+
+    def run_screen_saver(self):
+            for ball in self.balls:
+                ball.move_ball()
+            self.canvas.after(20, self.run_screen_saver)
+
+    def myquit(self, event):
+        self.root.destroy()
+
+    def __init__(self, num_balls):
+        self.root = Tk()
+        w, h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.overrideredirect(1)
+        self.root.attributes("-alpha", 0.3)
+        self.root.bind("<Any-Button>", self.myquit)
+        self.root.bind("<Motion>", self.myquit)
+        self.canvas = Canvas(self.root, width=w, height=h)
+        self.canvas.pack()
+        for i in range(num_balls):
+            ball = RandomBall(self.canvas, scrnwidth=w, scrnheight=h)
+            ball.create_ball()
+            self.balls.append(ball)
+        self.run_screen_saver()
+        self.root.mainloop()
+
+
+try:
+    _fromUtf8 = QtCore.QString.fromUtf8
+except AttributeError:
+    _fromUtf8 = lambda s: s
+
+
+# introduce window
+class Ui_Form_1(object):
+    def setupUi(self, Form):
+        Form.setObjectName(_fromUtf8("Form"))
+        Form.resize(550, 288)
+        Form.setMinimumSize(QtCore.QSize(550, 288))
+        Form.setMaximumSize(QtCore.QSize(550, 288))
+        Form.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+        Form.setWindowTitle(QtGui.QApplication.translate("Form", "Simulating a Physical System", None, QtGui.QApplication.UnicodeUTF8))
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(_fromUtf8("PycharmProjects/untitled/test.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        Form.setWindowIcon(icon)
+        self.pushButton = QtGui.QPushButton(Form)
+        self.pushButton.setEnabled(False)
+        self.pushButton.setGeometry(QtCore.QRect(410, 230, 111, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Arial"))
+        font.setPointSize(14)
+        font.setBold(False)
+        font.setWeight(50)
+        self.pushButton.setFont(font)
+        self.pushButton.setText(QtGui.QApplication.translate("Form", "Next", None, QtGui.QApplication.UnicodeUTF8))
+        self.pushButton.setObjectName(_fromUtf8("pushButton"))
+        self.checkBox = QtGui.QCheckBox(Form)
+        self.checkBox.setGeometry(QtCore.QRect(20, 230, 201, 31))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Andalus"))
+        font.setPointSize(14)
+        font.setBold(True)
+        font.setWeight(75)
+        self.checkBox.setFont(font)
+        self.checkBox.setAcceptDrops(True)
+        self.checkBox.setText(QtGui.QApplication.translate("Form", "I know how to use it", None, QtGui.QApplication.UnicodeUTF8))
+        self.checkBox.setObjectName(_fromUtf8("checkBox"))
+        self.label = QtGui.QLabel(Form)
+        self.label.setGeometry(QtCore.QRect(150, 10, 241, 21))
+        self.label.setText(QtGui.QApplication.translate("Form", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:14pt; font-weight:600; color:#000000;\">Introduction</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label.setObjectName(_fromUtf8("label"))
+        self.textBrowser = QtGui.QTextBrowser(Form)
+        self.textBrowser.setGeometry(QtCore.QRect(0, 40, 550, 181))
+        self.textBrowser.setAutoFillBackground(True)
+        self.textBrowser.setHtml(QtGui.QApplication.translate("Form", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> This procedure is designed by </span><span style=\" font-family:\'Meiryo UI\'; font-size:12pt; font-weight:600;\">Observer</span><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\">.</span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'宋体\'; font-size:12pt;\"><br /> </span><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\">We design it for imitate the collision of molecules in a  box . <br /> Use 3D model and graphs to show the data clearly . </span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"><br /> Wish you have a good time with our procedure . <br /> Using method :</span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 1.Tick &quot;Change temperature&quot; if you want to change data. </span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 2.The time and temperature of &quot;3D Simulation&quot; can change. </span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 3.After choose your number , click &quot;Draw graph&quot; to draw graphs.</span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 4.It may take you half minute to wait painting , you can click &quot;read news&quot; to kill time  .</span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 5.After calculating , click &quot;Home&quot; to come back to the main user interface .</span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 6.If you want to save the figure , just click &quot;Save&quot; , choose a file path , the procedure will create a new file there . In it , there will be four figure . </span></p>\n"
+"<p style=\" margin-top:12px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Meiryo UI\'; font-size:12pt;\"> 7.If there exist some special situation during calculating, you can click &quot;Exit Directly&quot; to close the procedure.</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.textBrowser.setObjectName(_fromUtf8("textBrowser"))
+        self.label_2 = QtGui.QLabel(Form)
+        self.label_2.setGeometry(QtCore.QRect(0, 270, 111, 20))
+        self.label_2.setText(QtGui.QApplication.translate("Form", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:11pt; font-weight:600;\">By Observer</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_2.setObjectName(_fromUtf8("label_2"))
+
+        self.retranslateUi(Form)
+        QtCore.QObject.connect(self.checkBox, QtCore.SIGNAL(_fromUtf8("clicked(bool)")), self.pushButton.setEnabled)
+        QtCore.QObject.connect(self.pushButton, QtCore.SIGNAL(_fromUtf8("clicked()")), Form.close)
+        QtCore.QMetaObject.connectSlotsByName(Form)
+        Form.setTabOrder(self.textBrowser, self.checkBox)
+        Form.setTabOrder(self.checkBox, self.pushButton)
+
+
+        # add
+        Form.setWindowFlags(Qt.Qt.FramelessWindowHint)
+        jpeg = QtGui.QPixmap()
+        jpeg.load("./bg1.jpg")
+        plat = QtGui.QPalette()
+        plat.setBrush(Form.backgroundRole(), QtGui.QBrush(jpeg))
+        Form.setPalette(plat)
+        Form.setAutoFillBackground(True)
+
+    def retranslateUi(self, Form):
+        pass
+
+
+# change data
+class Ui_MainWindow(object):
+    def setupUi(self, MainWindow):
+        MainWindow.setObjectName(_fromUtf8("MainWindow"))
+        MainWindow.setEnabled(True)
+        MainWindow.resize(900, 500)
+        MainWindow.setMinimumSize(QtCore.QSize(900, 500))
+        MainWindow.setMaximumSize(QtCore.QSize(900, 500))
+        MainWindow.setWindowTitle(QtGui.QApplication.translate("MainWindow", "Simulating", None, QtGui.QApplication.UnicodeUTF8))
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(_fromUtf8("main.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        MainWindow.setWindowIcon(icon)
+        self.centralwidget = QtGui.QWidget(MainWindow)
+        self.centralwidget.setObjectName(_fromUtf8("centralwidget"))
+        self.pushButton = QtGui.QPushButton(self.centralwidget)
+        self.pushButton.setGeometry(QtCore.QRect(250, 420, 131, 51))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Calibri"))
+        font.setPointSize(14)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.pushButton.setFont(font)
+        self.pushButton.setText(QtGui.QApplication.translate("MainWindow", "Draw Graph", None, QtGui.QApplication.UnicodeUTF8))
+        self.pushButton.setObjectName(_fromUtf8("pushButton"))
+        self.label_3 = QtGui.QLabel(self.centralwidget)
+        self.label_3.setGeometry(QtCore.QRect(10, 200, 281, 51))
+        self.label_3.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#00ffff;\">Enter</span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600;\"> </span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#ff0000;\">totalEnergy</span></p>\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; color:#55ffff;\">(the total amount of energy)</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_3.setObjectName(_fromUtf8("label_3"))
+        self.label_2 = QtGui.QLabel(self.centralwidget)
+        self.label_2.setGeometry(QtCore.QRect(0, 330, 321, 61))
+        self.label_2.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#55ffff;\">Enter</span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600;\"> </span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#ff0000;\">N</span></p>\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; color:#55ffff;\">(the number of molecules in the system )</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_2.setObjectName(_fromUtf8("label_2"))
+        self.label_5 = QtGui.QLabel(self.centralwidget)
+        self.label_5.setGeometry(QtCore.QRect(40, 280, 221, 31))
+        self.label_5.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#55ffff;\">Enter</span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600;\"> </span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#ff0000;\">Step</span></p>\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; color:#55ffff;\">(the times of collision )</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_5.setObjectName(_fromUtf8("label_5"))
+        self.label_4 = QtGui.QLabel(self.centralwidget)
+        self.label_4.setGeometry(QtCore.QRect(780, 0, 111, 41))
+        self.label_4.setStyleSheet(_fromUtf8(""))
+        self.label_4.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:11pt; font-weight:600; color:#dfdfdf;\">By Observer</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_4.setObjectName(_fromUtf8("label_4"))
+        self.label_1 = QtGui.QLabel(self.centralwidget)
+        self.label_1.setGeometry(QtCore.QRect(200, 0, 541, 61))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Comic Sans MS"))
+        font.setPointSize(36)
+        self.label_1.setFont(font)
+        self.label_1.setStyleSheet(_fromUtf8("color: rgb(85, 255, 255);"))
+        self.label_1.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'Comic Sans MS\'; font-size:36pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:24pt;\">Simulating a Physical System</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_1.setObjectName(_fromUtf8("label_1"))
+        self.comboBox = QtGui.QComboBox(self.centralwidget)
+        self.comboBox.setEnabled(True)
+        self.comboBox.setGeometry(QtCore.QRect(320, 140, 201, 31))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Lao UI"))
+        font.setPointSize(12)
+        font.setBold(False)
+        font.setItalic(False)
+        font.setWeight(50)
+        self.comboBox.setFont(font)
+        self.comboBox.setObjectName(_fromUtf8("comboBox"))
+        self.comboBox.addItem(_fromUtf8(""))
+        self.comboBox.setItemText(0, QtGui.QApplication.translate("MainWindow", "1-Set the same velocity", None, QtGui.QApplication.UnicodeUTF8))
+        self.comboBox.addItem(_fromUtf8(""))
+        self.comboBox.setItemText(1, QtGui.QApplication.translate("MainWindow", "2-Set all velocities to zero", None, QtGui.QApplication.UnicodeUTF8))
+        self.label = QtGui.QLabel(self.centralwidget)
+        self.label.setGeometry(QtCore.QRect(60, 140, 171, 21))
+        self.label.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#55ffff;\">Choose</span><span style=\" font-family:\'Aharoni\'; font-size:11pt; font-weight:600; color:#ff0000;\"> state</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label.setObjectName(_fromUtf8("label"))
+        self.checkBox = QtGui.QCheckBox(self.centralwidget)
+        self.checkBox.setGeometry(QtCore.QRect(620, 150, 261, 51))
+        self.checkBox.setStyleSheet(_fromUtf8("font: 75 14pt \"MS Serif\";\n"
+"color: rgb(85, 255, 255);"))
+        self.checkBox.setText(QtGui.QApplication.translate("MainWindow", "Change temperature(optional)", None, QtGui.QApplication.UnicodeUTF8))
+        self.checkBox.setObjectName(_fromUtf8("checkBox"))
+        self.horizontalSlider = QtGui.QSlider(self.centralwidget)
+        self.horizontalSlider.setGeometry(QtCore.QRect(310, 290, 201, 20))
+        self.horizontalSlider.setMinimum(1000)
+        self.horizontalSlider.setMaximum(5000)
+        self.horizontalSlider.setPageStep(100)
+        self.horizontalSlider.setProperty("value", 3000)
+        self.horizontalSlider.setOrientation(QtCore.Qt.Horizontal)
+        self.horizontalSlider.setObjectName(_fromUtf8("horizontalSlider"))
+        self.horizontalSlider_2 = QtGui.QSlider(self.centralwidget)
+        self.horizontalSlider_2.setGeometry(QtCore.QRect(310, 350, 201, 20))
+        self.horizontalSlider_2.setMinimum(10)
+        self.horizontalSlider_2.setMaximum(200)
+        self.horizontalSlider_2.setSingleStep(10)
+        self.horizontalSlider_2.setPageStep(20)
+        self.horizontalSlider_2.setProperty("value", 50)
+        self.horizontalSlider_2.setOrientation(QtCore.Qt.Horizontal)
+        self.horizontalSlider_2.setObjectName(_fromUtf8("horizontalSlider_2"))
+        self.spinBox = QtGui.QSpinBox(self.centralwidget)
+        self.spinBox.setGeometry(QtCore.QRect(510, 290, 61, 22))
+        self.spinBox.setMinimum(1000)
+        self.spinBox.setMaximum(5000)
+        self.spinBox.setSingleStep(100)
+        self.spinBox.setProperty("value", 3000)
+        self.spinBox.setObjectName(_fromUtf8("spinBox"))
+        self.spinBox_2 = QtGui.QSpinBox(self.centralwidget)
+        self.spinBox_2.setGeometry(QtCore.QRect(510, 350, 61, 22))
+        self.spinBox_2.setMinimum(10)
+        self.spinBox_2.setMaximum(200)
+        self.spinBox_2.setSingleStep(10)
+        self.spinBox_2.setProperty("value", 50)
+        self.spinBox_2.setObjectName(_fromUtf8("spinBox_2"))
+        self.horizontalSlider_3 = QtGui.QSlider(self.centralwidget)
+        self.horizontalSlider_3.setGeometry(QtCore.QRect(310, 220, 201, 19))
+        self.horizontalSlider_3.setMinimum(100)
+        self.horizontalSlider_3.setMaximum(5000)
+        self.horizontalSlider_3.setSingleStep(1)
+        self.horizontalSlider_3.setPageStep(100)
+        self.horizontalSlider_3.setProperty("value", 500)
+        self.horizontalSlider_3.setOrientation(QtCore.Qt.Horizontal)
+        self.horizontalSlider_3.setObjectName(_fromUtf8("horizontalSlider_3"))
+        self.spinBox_3 = QtGui.QSpinBox(self.centralwidget)
+        self.spinBox_3.setGeometry(QtCore.QRect(510, 220, 61, 22))
+        self.spinBox_3.setMinimum(100)
+        self.spinBox_3.setMaximum(5000)
+        self.spinBox_3.setSingleStep(100)
+        self.spinBox_3.setProperty("value", 500)
+        self.spinBox_3.setObjectName(_fromUtf8("spinBox_3"))
+        self.spinBox_4 = QtGui.QSpinBox(self.centralwidget)
+        self.spinBox_4.setGeometry(QtCore.QRect(720, 330, 71, 22))
+        self.spinBox_4.setMinimum(5)
+        self.spinBox_4.setMaximum(30)
+        self.spinBox_4.setObjectName(_fromUtf8("spinBox_4"))
+        self.label_6 = QtGui.QLabel(self.centralwidget)
+        self.label_6.setGeometry(QtCore.QRect(690, 270, 121, 31))
+        self.label_6.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:12pt; font-weight:600; color:#55ffff;\">Time(show 3D)</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_6.setObjectName(_fromUtf8("label_6"))
+        self.pushButton_2 = QtGui.QPushButton(self.centralwidget)
+        self.pushButton_2.setGeometry(QtCore.QRect(680, 430, 141, 51))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Calibri"))
+        font.setPointSize(14)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.pushButton_2.setFont(font)
+        self.pushButton_2.setText(QtGui.QApplication.translate("MainWindow", "3D Simulation", None, QtGui.QApplication.UnicodeUTF8))
+        self.pushButton_2.setObjectName(_fromUtf8("pushButton_2"))
+        self.horizontalSlider_4 = QtGui.QSlider(self.centralwidget)
+        self.horizontalSlider_4.setEnabled(False)
+        self.horizontalSlider_4.setGeometry(QtCore.QRect(640, 220, 160, 19))
+        self.horizontalSlider_4.setMinimum(100)
+        self.horizontalSlider_4.setMaximum(400)
+        self.horizontalSlider_4.setProperty("value", 300)
+        self.horizontalSlider_4.setOrientation(QtCore.Qt.Horizontal)
+        self.horizontalSlider_4.setObjectName(_fromUtf8("horizontalSlider_4"))
+        self.spinBox_5 = QtGui.QSpinBox(self.centralwidget)
+        self.spinBox_5.setEnabled(False)
+        self.spinBox_5.setGeometry(QtCore.QRect(800, 220, 51, 22))
+        self.spinBox_5.setMinimum(100)
+        self.spinBox_5.setMaximum(400)
+        self.spinBox_5.setProperty("value", 300)
+        self.spinBox_5.setObjectName(_fromUtf8("spinBox_5"))
+        self.line_5 = QtGui.QFrame(self.centralwidget)
+        self.line_5.setGeometry(QtCore.QRect(590, 70, 16, 431))
+        self.line_5.setFrameShape(QtGui.QFrame.VLine)
+        self.line_5.setFrameShadow(QtGui.QFrame.Sunken)
+        self.line_5.setObjectName(_fromUtf8("line_5"))
+        self.line = QtGui.QFrame(self.centralwidget)
+        self.line.setGeometry(QtCore.QRect(0, 60, 901, 21))
+        self.line.setFrameShape(QtGui.QFrame.HLine)
+        self.line.setFrameShadow(QtGui.QFrame.Sunken)
+        self.line.setObjectName(_fromUtf8("line"))
+        self.label_7 = QtGui.QLabel(self.centralwidget)
+        self.label_7.setGeometry(QtCore.QRect(210, 80, 191, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Cataneo BT"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setWeight(75)
+        self.label_7.setFont(font)
+        self.label_7.setStyleSheet(_fromUtf8(""))
+        self.label_7.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'Cataneo BT\'; font-size:12pt; font-weight:600; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:14pt; color:#ff55ff;\">Graph Simulation</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_7.setObjectName(_fromUtf8("label_7"))
+        self.label_8 = QtGui.QLabel(self.centralwidget)
+        self.label_8.setGeometry(QtCore.QRect(610, 80, 271, 61))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Cataneo BT"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setWeight(75)
+        self.label_8.setFont(font)
+        self.label_8.setText(QtGui.QApplication.translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'Cataneo BT\'; font-size:12pt; font-weight:600; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:16pt; color:#ff55ff;\">3D Simulation</span></p>\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:16pt; color:#ff55ff;\">(Optional Part)</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_8.setObjectName(_fromUtf8("label_8"))
+        MainWindow.setCentralWidget(self.centralwidget)
+
+        self.retranslateUi(MainWindow)
+        QtCore.QObject.connect(self.checkBox, QtCore.SIGNAL(_fromUtf8("clicked(bool)")), self.horizontalSlider_4.setEnabled)
+        QtCore.QObject.connect(self.checkBox, QtCore.SIGNAL(_fromUtf8("clicked(bool)")), self.spinBox_5.setEnabled)
+        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+        MainWindow.setTabOrder(self.comboBox, self.horizontalSlider_3)
+        MainWindow.setTabOrder(self.horizontalSlider_3, self.spinBox_3)
+        MainWindow.setTabOrder(self.spinBox_3, self.horizontalSlider)
+        MainWindow.setTabOrder(self.horizontalSlider, self.spinBox)
+        MainWindow.setTabOrder(self.spinBox, self.horizontalSlider_2)
+        MainWindow.setTabOrder(self.horizontalSlider_2, self.spinBox_2)
+        MainWindow.setTabOrder(self.spinBox_2, self.pushButton)
+        MainWindow.setTabOrder(self.pushButton, self.checkBox)
+        MainWindow.setTabOrder(self.checkBox, self.horizontalSlider_4)
+        MainWindow.setTabOrder(self.horizontalSlider_4, self.spinBox_5)
+        MainWindow.setTabOrder(self.spinBox_5, self.spinBox_4)
+        MainWindow.setTabOrder(self.spinBox_4, self.pushButton_2)
+
+
+        jpeg = QtGui.QPixmap()
+        jpeg.load("./bg2.jpg")
+        plat = QtGui.QPalette()
+        plat.setBrush(MainWindow.backgroundRole(), QtGui.QBrush(jpeg))
+        MainWindow.setPalette(plat)
+        MainWindow.setAutoFillBackground(True)
+
+
+        self.thread = worker()
+        self.loading = loadingDlg()
+        QtCore.QObject.connect(self.pushButton, QtCore.SIGNAL("clicked()"), self.get_value)
+        QtCore.QObject.connect(self.thread, QtCore.SIGNAL("finished()"), self.finish)
+        self.thread.single[list, list, list].connect(self.draw)
+        QtCore.QObject.connect(self.spinBox, QtCore.SIGNAL("valueChanged(int)"),self.horizontalSlider, QtCore.SLOT("setValue(int)"))
+        QtCore.QObject.connect(self.horizontalSlider, QtCore.SIGNAL("valueChanged(int)"),self.spinBox, QtCore.SLOT("setValue(int)"))
+        QtCore.QObject.connect(self.spinBox_2, QtCore.SIGNAL("valueChanged(int)"),self.horizontalSlider_2, QtCore.SLOT("setValue(int)"))
+        QtCore.QObject.connect(self.horizontalSlider_2, QtCore.SIGNAL("valueChanged(int)"),self.spinBox_2, QtCore.SLOT("setValue(int)"))
+        QtCore.QObject.connect(self.spinBox_3, QtCore.SIGNAL("valueChanged(int)"),self.horizontalSlider_3, QtCore.SLOT("setValue(int)"))
+        QtCore.QObject.connect(self.horizontalSlider_3, QtCore.SIGNAL("valueChanged(int)"),self.spinBox_3, QtCore.SLOT("setValue(int)"))
+
+        QtCore.QObject.connect(self.spinBox_5, QtCore.SIGNAL("valueChanged(int)"),self.horizontalSlider_4, QtCore.SLOT("setValue(int)"))
+        QtCore.QObject.connect(self.horizontalSlider_4, QtCore.SIGNAL("valueChanged(int)"),self.spinBox_5, QtCore.SLOT("setValue(int)"))
+
+    def retranslateUi(self, MainWindow):
+        pass
+
+    # draw function
+    def draw(self, a, b, c):
+        list_demonEnergy=a
+        list_velocity=c
+        list_operation=b
+        list_demonEnergy=list_demonEnergy[::-1]
+        list_operation=list_operation[::-1]
+        list_demonEnergy=list_demonEnergy[::-1]
+        list_operation=list_operation[::-1]
+        #figure_1
+        plt.figure(figsize=(6.75,5.00))
+        x_0=self.value_N
+        y_0=self.value_totalEnergy-list_demonEnergy[0]
+        plt.xlim(self.value_N, self.value_N*10)
+        plt.ylim(y_0,self.value_totalEnergy)
+        plt.xlabel("N")
+        plt.ylabel("Energy")
+        plt.title("N vs Energy")
+
+        for i in range(2,11):
+            x_1=x_0
+            y_1=y_0
+            x_0=self.value_N*i
+            y_0=self.value_totalEnergy-list_demonEnergy[i-1]
+            if self.value_state == 1:
+                z=self.value_totalEnergy
+            else:
+                z=0
+            plt.plot(x_0,y_0,'b-o',color="green")
+            plt.plot(x_0,self.value_totalEnergy,'b-o')
+            plt.plot([x_1,x_0],[y_1,y_0],color="green",linewidth=2)
+
+        plt.plot([self.value_N, self.value_N*10],[z,z],label="$totalEnergy$",color="blue",linewidth=2)
+        plt.plot([x_1,x_0],[y_1,y_0],linewidth=2,color="green",label="$systemEnergy$")
+        plt.grid(True)
+        plt.legend()
+        plt.savefig("figure1.png")
+        fig_2=plt.figure(figsize=(6.75,5.00))
+        list_operation_2=list_velocity[0]
+        list_figure_2=[0 for i in range(10)]
+
+        for i in list_operation_2:
+            if i>4:
+                list_figure_2[9]+=1
+            elif i<=4 and i>3:
+                list_figure_2[8]+=1
+            elif i<=3 and i>2:
+                list_figure_2[7]+=1
+            elif i<=2 and i>1:
+                list_figure_2[6]+=1
+            elif i<=1 and i>0:
+                list_figure_2[5]+=1
+            elif i<=0 and i>-1:
+                list_figure_2[4]+=1
+            elif i<=-1 and i>-2:
+                list_figure_2[3]+=1
+            elif i<=-2 and i>-3:
+                list_figure_2[2]+=1
+            elif i<=-3 and i>-4:
+                list_figure_2[1]+=1
+            elif i<=-4 :
+                list_figure_2[0]+=1
+        ax = fig_2.add_subplot(111, projection='3d')
+        xpos_2 = []
+        ypos_2 =[]
+        zpos_2 = []
+        dx_2 = []
+        dy_2 = []
+        dz_2 = []
+        for i in range(len(list_figure_2)):
+            xpos_2[0:0]= [-5+i]
+            ypos_2[0:0]=[0.8]
+            zpos_2[0:0]=[0]
+            dx_2[0:0]=[1]
+            dy_2[0:0]=[0.2]
+            dz_2[0:0]=[list_figure_2[i]]
+        xpos_2 = xpos_2[::-1]
+        ypos_2 = ypos_2[::-1]
+        zpos_2 = zpos_2[::-1]
+        dx_2 = dx_2[::-1]
+        dy_2 = dy_2[::-1]
+        dz_2 = dz_2[::-1]
+        ax.bar3d(xpos_2, ypos_2, zpos_2, dx_2, dy_2, dz_2,color="g",alpha=0.8)
+        plt.xlabel("V")
+        ax.set_zlabel("Frequence")
+        plt.ylim(0,1)
+        plt.title("Final Particle Velocity Distribution")
+        plt.grid()
+        ax.view_init(18, -114)
+        plt.savefig("figure2.png")
+
+        fig_3=plt.figure(figsize=(6.75,5.00))
+        list_operation_3=list_operation[-1]
+        list_figure_3=[0 for i in range(13)]
+
+        for i in list_operation_3:
+            if i>12:
+                list_figure_3[12]+=1
+            elif i<=12 and i>11:
+                list_figure_3[11]+=1
+            elif i<=11 and i>10:
+                list_figure_3[10]+=1
+            elif i<=10 and i>9:
+                list_figure_3[9]+=1
+            elif i<=9 and i>8:
+                list_figure_3[8]+=1
+            elif i<=8 and i>7:
+                list_figure_3[7]+=1
+            elif i<=7 and i>6:
+                list_figure_3[6]+=1
+            elif i<=6 and i>5:
+                list_figure_3[5]+=1
+            elif i<=5 and i>4:
+                list_figure_3[4]+=1
+            elif i<=4 and i>3 :
+                list_figure_3[3]+=1
+            elif i<=3 and i>2 :
+                list_figure_3[2]+=1
+            elif i<=2 and i>1 :
+                list_figure_3[1]+=1
+            elif i<=1 and i>0 :
+                list_figure_3[0]+=1
+        ax = fig_3.add_subplot(111, projection='3d')
+        xpos_3 = []
+        ypos_3 =[]
+        zpos_3 = []
+        dx_3 = []
+        dy_3 = []
+        dz_3 = []
+        for i in range(len(list_figure_3)):
+            xpos_3[0:0]= [i]
+            ypos_3[0:0]=[0.8]
+            zpos_3[0:0]=[0]
+            dx_3[0:0]=[1]
+            dy_3[0:0]=[0.2]
+            dz_3[0:0]=[list_figure_3[i]]
+        xpos_3 = xpos_3[::-1]
+        ypos_3 = ypos_3[::-1]
+        zpos_3 = zpos_3[::-1]
+        dx_3 = dx_3[::-1]
+        dy_3 = dy_3[::-1]
+        dz_3 = dz_3[::-1]
+        ax.bar3d(xpos_3, ypos_3, zpos_3, dx_3, dy_3, dz_3,color="b",alpha=0.8)
+        plt.xlabel("Demon Energy")
+        ax.set_zlabel("Frequence")
+        plt.ylim(0,1)
+        plt.title("Demon Energy Histogram")
+        plt.grid()
+        ax.view_init(18, -114)
+        plt.savefig("figure3.png")
+
+        #figure_4
+        plt.figure(figsize=(6.75, 5.00))
+        list_operation_4=list_operation[-1]
+        list_operation_4=list_operation_4[::-1]
+        x_0=0
+        y_0=0
+        k=0
+        plt.xlim(0,len(list_operation_4))
+        plt.ylim(0, self.value_totalEnergy/10)
+        for i in range(0,len(list_operation_4),int(len(list_operation_4)/20)):
+            x_1=x_0
+            y_1=y_0
+            x_0=i+1
+            y_0=list_operation_4[i]
+            plt.plot([x_1,x_0],[y_1,y_0],color="green",linewidth=1)
+            k+=1
+            name=str(k)+".png"
+            plt.title("Demon Energy Times")
+            plt.xlabel("steps")
+            plt.ylabel("Demon Energy")
+            plt.grid(True)
+            plt.savefig(name)
+        plt.figure(figsize=(6.75, 5.00))
+        x_0=0
+        y_0=0
+        plt.ylim(0, self.value_totalEnergy/10)
+        for i in range(0,len(list_operation_4), int(len(list_operation_4)/20)):
+            x_1=x_0
+            y_1=y_0
+            x_0=i+1
+            y_0=list_operation_4[i]
+            plt.plot([x_1,x_0],[y_1,y_0],color="green",linewidth=1)
+        x_1=x_0
+        y_1=y_0
+        x_0=len(list_operation_4)
+        y_0=list_operation_4[-1]
+        plt.plot([x_1,x_0],[y_1,y_0],color="green",linewidth=1)
+        plt.title("Demon Energy Times")
+        plt.xlabel("steps")
+        plt.ylabel("Demon Energy")
+        plt.grid(True)
+        plt.savefig("figure4.png")
+
+    def finish(self):
+        self.loading.hide()
+        finish_music()
+        form_g = MyForm_3()
+        form_g.show()
+        form_g.exec_()
+        myapp_2.show()
+
+    def get_value(self):
+        value_N = self.spinBox_2.text()
+        value_totalEnergy = self.spinBox_3.text()
+        value_step = self.spinBox.text()
+        self.value_state = int(self.comboBox.currentIndex()) + 1
+
+        self.value_N = int(value_N)
+        self.value_totalEnergy = int(value_totalEnergy)
+        self.value_step = int(value_step)
+        myapp_2.hide()
+        self.thread.render(self.value_N, self.value_totalEnergy, self.value_step, self.value_state)
+        self.loading.show()
+
+
+# show dialog
+class Ui_Dialog(object):
+    def setupUi(self, Dialog):
+        Dialog.setObjectName(_fromUtf8("Dialog"))
+        Dialog.resize(850, 537)
+        Dialog.setWindowTitle(QtGui.QApplication.translate("Dialog", "Result", None, QtGui.QApplication.UnicodeUTF8))
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(_fromUtf8("main.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        Dialog.setWindowIcon(icon)
+        self.commandLinkButton_5 = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton_5.setGeometry(QtCore.QRect(0, 430, 141, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Segoe UI"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.commandLinkButton_5.setFont(font)
+        self.commandLinkButton_5.setStyleSheet(_fromUtf8("color: rgb(255, 255, 0);\n"
+"background-color: rgb(95, 89, 89);"))
+        self.commandLinkButton_5.setText(QtGui.QApplication.translate("Dialog", "Save All", None, QtGui.QApplication.UnicodeUTF8))
+        icon1 = QtGui.QIcon()
+        icon1.addPixmap(QtGui.QPixmap(_fromUtf8("save.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.commandLinkButton_5.setIcon(icon1)
+        self.commandLinkButton_5.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton_5.setObjectName(_fromUtf8("commandLinkButton_5"))
+
+        self.commandLinkButton = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton.setGeometry(QtCore.QRect(0, 70, 141, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Segoe UI"))
+        font.setPointSize(12)
+        font.setItalic(True)
+        self.commandLinkButton.setFont(font)
+        self.commandLinkButton.setStyleSheet(_fromUtf8("color: rgb(255, 255, 0);\n"
+"background-color: rgb(95, 89, 89);"))
+        self.commandLinkButton.setText(QtGui.QApplication.translate("Dialog", "Picture 1", None, QtGui.QApplication.UnicodeUTF8))
+        icon2 = QtGui.QIcon()
+        icon2.addPixmap(QtGui.QPixmap(_fromUtf8("list.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.commandLinkButton.setIcon(icon2)
+        self.commandLinkButton.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton.setObjectName(_fromUtf8("commandLinkButton"))
+
+
+        self.commandLinkButton_6 = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton_6.setGeometry(QtCore.QRect(0, 470, 141, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Segoe UI"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.commandLinkButton_6.setFont(font)
+        self.commandLinkButton_6.setStyleSheet(_fromUtf8("color: rgb(255, 255, 0);\n"
+"background-color: rgb(95, 89, 89);"))
+        self.commandLinkButton_6.setText(QtGui.QApplication.translate("Dialog", "Home", None, QtGui.QApplication.UnicodeUTF8))
+        icon3 = QtGui.QIcon()
+        icon3.addPixmap(QtGui.QPixmap(_fromUtf8("home.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.commandLinkButton_6.setIcon(icon3)
+        self.commandLinkButton_6.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton_6.setObjectName(_fromUtf8("commandLinkButton_6"))
+
+        self.graphicsView = QtGui.QGraphicsView(Dialog)
+        self.graphicsView.setGeometry(QtCore.QRect(140, 10, 700, 515))
+        self.graphicsView.setObjectName(_fromUtf8("graphicsView"))
+
+        self.commandLinkButton_3 = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton_3.setGeometry(QtCore.QRect(0, 150, 141, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Segoe UI"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.commandLinkButton_3.setFont(font)
+        self.commandLinkButton_3.setStyleSheet(_fromUtf8("color: rgb(255, 255, 0);\n"
+"background-color: rgb(95, 89, 89);"))
+        self.commandLinkButton_3.setText(QtGui.QApplication.translate("Dialog", "Picture 3", None, QtGui.QApplication.UnicodeUTF8))
+        self.commandLinkButton_3.setIcon(icon2)
+        self.commandLinkButton_3.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton_3.setObjectName(_fromUtf8("commandLinkButton_3"))
+
+        self.commandLinkButton_2 = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton_2.setGeometry(QtCore.QRect(0, 110, 141, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Segoe UI"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.commandLinkButton_2.setFont(font)
+        self.commandLinkButton_2.setStyleSheet(_fromUtf8("color: rgb(255, 255, 0);\n"
+"background-color: rgb(95, 89, 89);"))
+        self.commandLinkButton_2.setText(QtGui.QApplication.translate("Dialog", "Picture 2", None, QtGui.QApplication.UnicodeUTF8))
+        self.commandLinkButton_2.setIcon(icon2)
+        self.commandLinkButton_2.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton_2.setObjectName(_fromUtf8("commandLinkButton_2"))
+        self.label = QtGui.QLabel(Dialog)
+        self.label.setGeometry(QtCore.QRect(0, 520, 71, 16))
+        self.label.setText(QtGui.QApplication.translate("Dialog", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'SimSun\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+"<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:8pt; color:#aaaa7f;\">By observer</span></p></body></html>", None, QtGui.QApplication.UnicodeUTF8))
+        self.label.setObjectName(_fromUtf8("label"))
+        self.commandLinkButton_4 = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton_4.setGeometry(QtCore.QRect(0, 190, 141, 41))
+        font = QtGui.QFont()
+        font.setFamily(_fromUtf8("Segoe UI"))
+        font.setPointSize(12)
+        font.setBold(True)
+        font.setItalic(True)
+        font.setWeight(75)
+        self.commandLinkButton_4.setFont(font)
+        self.commandLinkButton_4.setStyleSheet(_fromUtf8("color: rgb(255, 255, 0);\n"
+"background-color: rgb(95, 89, 89);"))
+        self.commandLinkButton_4.setText(QtGui.QApplication.translate("Dialog", "Picture 4", None, QtGui.QApplication.UnicodeUTF8))
+        self.commandLinkButton_4.setIcon(icon2)
+        self.commandLinkButton_4.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton_4.setObjectName(_fromUtf8("commandLinkButton_4"))
+        self.label_2 = QtGui.QLabel(Dialog)
+        self.label_2.setGeometry(QtCore.QRect(40, 30, 81, 21))
+        self.label_2.setStyleSheet(_fromUtf8("font: 75 italic 14pt \"Aharoni\";\n"
+"color: rgb(255, 170, 0);"))
+        self.label_2.setText(QtGui.QApplication.translate("Dialog", "Result", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_2.setObjectName(_fromUtf8("label_2"))
+
+        self.retranslateUi(Dialog)
+        QtCore.QObject.connect(self.commandLinkButton_6, QtCore.SIGNAL(_fromUtf8("clicked()")), Dialog.close)
+        QtCore.QMetaObject.connectSlotsByName(Dialog)
+        Dialog.setTabOrder(self.commandLinkButton, self.commandLinkButton_2)
+        Dialog.setTabOrder(self.commandLinkButton_2, self.commandLinkButton_3)
+        Dialog.setTabOrder(self.commandLinkButton_3, self.commandLinkButton_4)
+        Dialog.setTabOrder(self.commandLinkButton_4, self.commandLinkButton_5)
+        Dialog.setTabOrder(self.commandLinkButton_5, self.commandLinkButton_6)
+        Dialog.setTabOrder(self.commandLinkButton_6, self.graphicsView)
+
+
+        # add
+        self.retranslateUi(Dialog)
+        self.thread = Loop()
+        Dialog.setWindowFlags(Qt.Qt.FramelessWindowHint)
+        jpeg = QtGui.QPixmap()
+        jpeg.load("./bg3.jpg")
+        plat = QtGui.QPalette()
+        plat.setBrush(Dialog.backgroundRole(), QtGui.QBrush(jpeg))
+        Dialog.setPalette(plat)
+        Dialog.setAutoFillBackground(True)
+
+    def retranslateUi(self, Dialog):
+        pass
+
+
+# loading dialog
+class Ui_loading_Dialog(object):
+    def setupUi(self, Dialog):
+        Dialog.setObjectName(_fromUtf8("Dialog"))
+        Dialog.resize(400, 300)
+        Dialog.setWindowTitle(QtGui.QApplication.translate("Dialog", "Loading...", None, QtGui.QApplication.UnicodeUTF8))
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(_fromUtf8("main.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        Dialog.setWindowIcon(icon)
+        self.label = QtGui.QLabel(Dialog)
+        self.label.setGeometry(QtCore.QRect(0, 0, 400, 300))
+        self.label.setText(_fromUtf8(""))
+        self.label.setObjectName(_fromUtf8("label"))
+        self.commandLinkButton = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton.setGeometry(QtCore.QRect(0, 260, 200, 40))
+        self.commandLinkButton.setStyleSheet(_fromUtf8("color: rgb(255, 170, 0);\n"
+"background-color: rgb(51, 51, 51);\n"
+"font: 75 14pt \"Aharoni\";"))
+        self.commandLinkButton.setText(QtGui.QApplication.translate("Dialog", "Read News", None, QtGui.QApplication.UnicodeUTF8))
+        icon1 = QtGui.QIcon()
+        icon1.addPixmap(QtGui.QPixmap(_fromUtf8("news.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.commandLinkButton.setIcon(icon1)
+        self.commandLinkButton.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton.setObjectName(_fromUtf8("commandLinkButton"))
+        self.commandLinkButton_2 = QtGui.QCommandLinkButton(Dialog)
+        self.commandLinkButton_2.setGeometry(QtCore.QRect(200, 260, 200, 40))
+        self.commandLinkButton_2.setStyleSheet(_fromUtf8("color: rgb(255, 170, 0);\n"
+"background-color: rgb(51, 51, 51);\n"
+"font: 75 14pt \"Aharoni\";"))
+        self.commandLinkButton_2.setText(QtGui.QApplication.translate("Dialog", "Exit directly", None, QtGui.QApplication.UnicodeUTF8))
+
+        icon2 = QtGui.QIcon()
+        icon2.addPixmap(QtGui.QPixmap(_fromUtf8("exit.ico")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.commandLinkButton_2.setIcon(icon2)
+        self.commandLinkButton_2.setIconSize(QtCore.QSize(32, 32))
+        self.commandLinkButton_2.setObjectName(_fromUtf8("commandLinkButton_2"))
+
+        self.retranslateUi(Dialog)
+        QtCore.QMetaObject.connectSlotsByName(Dialog)
+
+        self.movie = QtGui.QMovie("loading.gif")
+        self.label.setMovie(self.movie)
+        self.movie.start()
+        self.retranslateUi(Dialog)
+        QtCore.QMetaObject.connectSlotsByName(Dialog)
+
+        QtCore.QObject.connect(self.commandLinkButton_2, QtCore.SIGNAL(_fromUtf8("clicked()")), Dialog.close)
+        QtCore.QObject.connect(self.commandLinkButton, QtCore.SIGNAL(_fromUtf8("clicked()")), self.news)
+
+    def retranslateUi(self, Dialog):
+        pass
+
+    def news(self):
+        try:
+            os.startfile("waiting.pyw")
+        except:
+            pass
+
+
+###########################################################
+
+
+class MyForm_1(QtGui.QMainWindow):
+    def __init__(self, parent=None):
+        QtGui.QWidget.__init__(self, parent)
+        self.ui = Ui_Form_1()
+        self.ui.setupUi(self)
+
+
+    def mousePressEvent(self,event):
+        if event.button() == QtCore.Qt.LeftButton:
+           self.dragPosition = event.globalPos() - self.frameGeometry().topLeft()
+           event.accept()
+
+    def mouseMoveEvent(self,event):
+        if event.buttons() ==QtCore.Qt.LeftButton:
+            self.move(event.globalPos() - self.dragPosition)
+            event.accept()
+
+
+class MyForm_2(QtGui.QMainWindow):
+
+    def __init__(self, parent=None):
+        QtGui.QWidget.__init__(self, parent)
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+        QtCore.QObject.connect(self.ui.pushButton_2, QtCore.SIGNAL("clicked()"), self.show_3D)
+
+
+    def show_3D(self):
+
+        begin = time.clock()
+        myapp_2.hide()
+        mytime = int(self.ui.spinBox_4.text())
+        Natoms = int(self.ui.spinBox_2.text())
+        T = int(self.ui.spinBox_5.text())
+        win=500
+
+        L = 1.
+        gray = (0.7,0.7,0.7)
+        Raxes = 0.005
+        Matom = 4E-3/6E23
+        Ratom = 0.03
+
+        # actually, we can join these data to the main wiondow, however
+        # we do not know what are the meaning...
+
+        k = 1.4E-23
+        dt = 1E-5
+
+        scene = display(title="Gas", width=win, height=win, x=0, y=0,
+                        range=L, center=(L/2.,L/2.,L/2.))
+        scene.exit = False
+        deltav = 100.
+        vdist = gdisplay(x=0, y=win, ymax = Natoms*deltav/1000.,
+                     width=win, height=win/2, xtitle='v', ytitle='dN')
+        vdist.display.exit = False
+        theory = gcurve(color=color.cyan)
+        observation = ghistogram(bins=arange(0.,3000.,deltav),
+                                accumulate=1, average=1, color=color.red)
+
+        dv = 10.
+        for v in arange(0.,3001.+dv,dv):
+            theory.plot(pos=(v,
+                (deltav/dv)*Natoms*4.*pi*((Matom/(2.*pi*k*T))**1.5)
+                             *exp((-0.5*Matom*v**2)/(k*T))*v**2*dv))
+
+        xaxis = curve(pos=[(0,0,0), (L,0,0)], color=gray, radius=Raxes)
+        yaxis = curve(pos=[(0,0,0), (0,L,0)], color=gray, radius=Raxes)
+        zaxis = curve(pos=[(0,0,0), (0,0,L)], color=gray, radius=Raxes)
+        xaxis2 = curve(pos=[(L,L,L), (0,L,L), (0,0,L), (L,0,L)], color=gray, radius=Raxes)
+        yaxis2 = curve(pos=[(L,L,L), (L,0,L), (L,0,0), (L,L,0)], color=gray, radius=Raxes)
+        zaxis2 = curve(pos=[(L,L,L), (L,L,0), (0,L,0), (0,L,L)], color=gray, radius=Raxes)
+
+        Atoms = []
+        colors = [color.red, color.green, color.blue,
+                  color.yellow, color.cyan, color.magenta]
+        poslist = []
+        plist = []
+        mlist = []
+        rlist = []
+
+        for i in range(Natoms):
+            Lmin = 1.1*Ratom
+            Lmax = L-Lmin
+            x = Lmin+(Lmax-Lmin)*random()
+            y = Lmin+(Lmax-Lmin)*random()
+            z = Lmin+(Lmax-Lmin)*random()
+            r = Ratom
+            Atoms = Atoms+[sphere(pos=(x,y,z), radius=r, color=colors[i % 6])]
+            mass = Matom*r**3/Ratom**3
+            pavg = sqrt(2.*mass*1.5*k*T)
+            theta = pi*random()
+            phi = 2*pi*random()
+            px = pavg*sin(theta)*cos(phi)
+            py = pavg*sin(theta)*sin(phi)
+            pz = pavg*cos(theta)
+            poslist.append((x,y,z))
+            plist.append((px,py,pz))
+            mlist.append(mass)
+            rlist.append(r)
+
+        pos = array(poslist)
+        p = array(plist)
+        m = array(mlist)
+        m.shape = (Natoms,1)
+        radius = array(rlist)
+        t = 0.0
+        Nsteps = 0
+        pos = pos+(p/m)*(dt/2.)
+
+        while True:
+            observation.plot(data=mag(p/m))
+            pos = pos+(p/m)*dt
+
+            r = pos-pos[:,np.newaxis]
+            rmag = sqrt(add.reduce(r*r,-1))
+            hit = less_equal(rmag,radius+radius[:,np.newaxis])-identity(Natoms)
+            hitlist = sort(nonzero(hit.flat)).tolist()[0]
+
+            for ij in hitlist:
+                i, j = divmod(ij,Natoms)
+                hitlist.remove(j*Natoms+i)
+                ptot = p[i]+p[j]
+                mi = m[i,0]
+                mj = m[j,0]
+                vi = p[i]/mi
+                vj = p[j]/mj
+                ri = Atoms[i].radius
+                rj = Atoms[j].radius
+                a = mag(vj-vi)**2
+                if a == 0: continue
+                b = 2*dot(pos[i]-pos[j],vj-vi)
+                c = mag(pos[i]-pos[j])**2-(ri+rj)**2
+                d = b**2-4.*a*c
+                if d < 0: continue
+                deltat = (-b+sqrt(d))/(2.*a)
+                pos[i] = pos[i]-(p[i]/mi)*deltat
+                pos[j] = pos[j]-(p[j]/mj)*deltat
+                mtot = mi+mj
+                pcmi = p[i]-ptot*mi/mtot
+                pcmj = p[j]-ptot*mj/mtot
+                rrel = norm(pos[j]-pos[i])
+                pcmi = pcmi-2*dot(pcmi,rrel)*rrel
+                pcmj = pcmj-2*dot(pcmj,rrel)*rrel
+                p[i] = pcmi+ptot*mi/mtot
+                p[j] = pcmj+ptot*mj/mtot
+                pos[i] = pos[i]+(p[i]/mi)*deltat
+                pos[j] = pos[j]+(p[j]/mj)*deltat
+
+            outside = less_equal(pos,Ratom)
+            p1 = p*outside
+            p = p-p1+abs(p1)
+            outside = greater_equal(pos,L-Ratom)
+            p1 = p*outside
+            p = p-p1-abs(p1)
+
+            for i in range(Natoms):
+                Atoms[i].pos = pos[i]
+
+            Nsteps = Nsteps+1
+            t = t+dt
+            b = time.clock()
+
+            if int(b-begin) > int(mytime+1):
+                myapp_2.show()
+                break
+
+class MyForm_3(QtGui.QDialog):
+    def __init__(self, parent=None):
+        QtGui.QWidget.__init__(self, parent)
+        self.ui = Ui_Dialog()
+        self.ui.setupUi(self)
+
+        pixmap = QtGui.QPixmap()
+        pixmap.load("./figure1.png")
+        self.ui.scene=QtGui.QGraphicsScene(self)
+        item=QtGui.QGraphicsPixmapItem(pixmap)
+        self.ui.scene.addItem(item)
+        self.ui.graphicsView.setScene(self.ui.scene)
+        QtCore.QObject.connect(self.ui.commandLinkButton, QtCore.SIGNAL("clicked()"), self.change_1)
+        QtCore.QObject.connect(self.ui.commandLinkButton_2, QtCore.SIGNAL("clicked()"), self.change_2)
+        QtCore.QObject.connect(self.ui.commandLinkButton_3, QtCore.SIGNAL("clicked()"), self.change_3)
+        QtCore.QObject.connect(self.ui.commandLinkButton_5, QtCore.SIGNAL("clicked()"), self.save)
+
+        QtCore.QObject.connect(self.ui.commandLinkButton_4, QtCore.SIGNAL("clicked()"), self.start_gif)
+        self.ui.thread.single[int].connect(self.updateUI)
+        QtCore.QObject.connect(self.ui.thread, QtCore.SIGNAL("finished()"), self.finish)
+
+    def start_gif(self):
+        self.ui.commandLinkButton.setEnabled(False)
+        self.ui.commandLinkButton_2.setEnabled(False)
+        self.ui.commandLinkButton_3.setEnabled(False)
+        self.ui.commandLinkButton_4.setEnabled(False)
+        self.ui.commandLinkButton_5.setEnabled(False)
+        self.ui.commandLinkButton_6.setEnabled(False)
+        self.ui.thread.render()
+
+    def change_1(self):
+        pixmap = QtGui.QPixmap()
+        pixmap.load("./figure1.png")
+        self.ui.scene=QtGui.QGraphicsScene(self)
+        item=QtGui.QGraphicsPixmapItem(pixmap)
+        self.ui.scene.addItem(item)
+        self.ui.graphicsView.setScene(self.ui.scene)
+
+    def change_2(self):
+        pixmap = QtGui.QPixmap()
+        pixmap.load("./figure2.png")
+        self.ui.scene=QtGui.QGraphicsScene(self)
+        item=QtGui.QGraphicsPixmapItem(pixmap)
+        self.ui.scene.addItem(item)
+        self.ui.graphicsView.setScene(self.ui.scene)
+
+    def change_3(self):
+        pixmap = QtGui.QPixmap()
+        pixmap.load("./figure3.png")
+        self.ui.scene=QtGui.QGraphicsScene(self)
+        item=QtGui.QGraphicsPixmapItem(pixmap)
+        self.ui.scene.addItem(item)
+        self.ui.graphicsView.setScene(self.ui.scene)
+
+    def finish(self):
+        pixmap = QtGui.QPixmap()
+        pixmap.load("./figure4.png")
+        self.ui.scene=QtGui.QGraphicsScene(self)
+        item=QtGui.QGraphicsPixmapItem(pixmap)
+        self.ui.scene.addItem(item)
+        self.ui.graphicsView.setScene(self.ui.scene)
+        self.ui.commandLinkButton.setEnabled(True)
+        self.ui.commandLinkButton_2.setEnabled(True)
+        self.ui.commandLinkButton_3.setEnabled(True)
+        self.ui.commandLinkButton_4.setEnabled(True)
+        self.ui.commandLinkButton_5.setEnabled(True)
+        self.ui.commandLinkButton_6.setEnabled(True)
+
+    def save(self):
+        filename = QtGui.QFileDialog.getSaveFileName(self, self.tr("save Image"),"new file",self.tr("Image Files(*.)"))
+
+        if filename != "":
+            new_filename = filename
+            new_filename = new_filename.split("/")
+            file_filename = new_filename[-1]
+            new_filename = new_filename[0:-1]
+            new_filename = "\\".join(new_filename)
+
+            path = new_filename
+            title = file_filename
+            new_path = os.path.join(path, title)
+
+            if not os.path.isdir(new_path):
+                os.makedirs(new_path)
+
+            for i in range(1,5):
+                old_fileplace = "figure"+str(i)+".png"
+                new_fileplace = new_path+"\\figure"+str(i)+".png"
+                shutil.copyfile(old_fileplace, new_fileplace)
+
+    def updateUI(self, picture):
+        number = 21-picture
+        name = "./"+str(number)+".png"
+        pixmap = QtGui.QPixmap()
+        pixmap.load(name)
+        self.ui.scene=QtGui.QGraphicsScene(self)
+        item=QtGui.QGraphicsPixmapItem(pixmap)
+        self.ui.scene.addItem(item)
+        self.ui.graphicsView.setScene(self.ui.scene)
+
+    def mousePressEvent(self,event):
+        if event.button() == QtCore.Qt.LeftButton:
+           self.dragPosition = event.globalPos() - self.frameGeometry().topLeft()
+           event.accept()
+
+    def mouseMoveEvent(self,event):
+        if event.buttons() ==QtCore.Qt.LeftButton:
+            self.move(event.globalPos() - self.dragPosition)
+            event.accept()
+
+
+class loadingDlg(QtGui.QMainWindow):
+    def __init__(self, parent=None):
+        QtGui.QWidget.__init__(self, parent)
+        self.ui = Ui_loading_Dialog()
+        self.ui.setupUi(self)
+        self.setWindowOpacity(1)
+        self.setWindowFlags(Qt.Qt.FramelessWindowHint)
+    def mousePressEvent(self,event):
+        if event.button() == QtCore.Qt.LeftButton:
+           self.dragPosition = event.globalPos() - self.frameGeometry().topLeft()
+           event.accept()
+
+    def mouseMoveEvent(self,event):
+        if event.buttons() ==QtCore.Qt.LeftButton:
+            self.move(event.globalPos() - self.dragPosition)
+            event.accept()
+            
+####################################################################
+
+    
+def introduction():
+    app_1 = QtGui.QApplication(sys.argv)
+    myapp_1 = MyForm_1()
+    myapp_1.show()
+    app_1.exec_()
+
+
+def input_window():
+    global myapp_2
+    app_2 = QtGui.QApplication(sys.argv)
+    myapp_2 = MyForm_2()
+    myapp_2.show()
+    app_2.exec_()
+
+
+def main():
+    t1 = threading.Thread(target=music)
+    t1.setDaemon(True)
+    t1.start()
+    Movie(60)
+    introduction()
+    input_window()
+    try:
+        os.startfile("ed.pyw")
+    except:
+        pass
+    try:
+        os.remove('figure1.png')
+        os.remove('figure2.png')
+        os.remove('figure3.png')
+        os.remove('figure4.png')
+        for i in range(1, 22):
+            name = str(i)+".png"
+            os.remove(name)
+    except:
+        pass
+    if int(time.clock()) != 0:
+        os.system('TASKKILL /F /IM python.exe')
+main()
